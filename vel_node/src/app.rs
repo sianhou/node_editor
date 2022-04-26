@@ -1,3 +1,5 @@
+use eframe::egui::WidgetType::DragValue;
+use eframe::egui::{Ui, Widget};
 use eframe::{
     egui::{self, DragValue},
     epi,
@@ -34,7 +36,7 @@ impl MyValueType {
         if let MyValueType::Scalar { value } = self {
             Ok(value)
         } else {
-            anyhow::bail!("Invalid cast from {:?} to scalar",self)
+            anyhow::bail!("Invalid cast from {:?} to scalar", self)
         }
     }
 }
@@ -99,12 +101,14 @@ impl NodeTemplateTrait for MyNodeTemplate {
     }
 
     fn user_data(&self) -> Self::NodeData {
-        MyNodeData {
-            template: *self
-        }
+        MyNodeData { template: *self }
     }
 
-    fn build_node(&self, graph: &mut Graph<Self::NodeData, Self::DataType, Self::ValueType>, node_id: NodeId) {
+    fn build_node(
+        &self,
+        graph: &mut Graph<Self::NodeData, Self::DataType, Self::ValueType>,
+        node_id: NodeId,
+    ) {
         macro_rules! input {
             (scalar $name:expr) => {
                 graph.add_input_param(
@@ -141,7 +145,14 @@ impl NodeTemplateTrait for MyNodeTemplate {
 
         match self {
             MyNodeTemplate::AddScalar => {
-                graph.add_input_param(node_id, "A".into(), MyDataType::Scalar, MyValueType::Scalar { value: 0.0 }, InputParamKind::ConnectionOrConstant, true);
+                graph.add_input_param(
+                    node_id,
+                    "A".into(),
+                    MyDataType::Scalar,
+                    MyValueType::Scalar { value: 0.0 },
+                    InputParamKind::ConnectionOrConstant,
+                    true,
+                );
                 input!(scalar "B");
                 output!(scalar "out");
             }
@@ -177,3 +188,85 @@ impl NodeTemplateTrait for MyNodeTemplate {
         }
     }
 }
+
+pub struct AllMyNodeTemplates;
+
+impl NodeTemplateIter for AllMyNodeTemplates {
+    type Item = MyNodeTemplate;
+
+    fn all_kinds(&self) -> Vec<Self::Item> {
+        vec![
+            MyNodeTemplate::MakeScalar,
+            MyNodeTemplate::MakeVector,
+            MyNodeTemplate::AddScalar,
+            MyNodeTemplate::SubtractScalar,
+            MyNodeTemplate::AddVector,
+            MyNodeTemplate::SubtractVector,
+            MyNodeTemplate::VectorTimesScalar,
+        ]
+    }
+}
+
+impl WidgetValueTrait for MyValueType {
+    fn value_widget(&mut self, param_name: &str, ui: &mut Ui) {
+        match self {
+            MyValueType::Vec2 { value } => {
+                ui.label(param_name);
+                ui.horizontal(|ui| {
+                    ui.label("x");
+                    ui.add(DragValue::new(&mut value.x));
+                    ui.label("y");
+                    ui.add(DragValue::new(&mut value.y));
+                });
+            }
+            MyValueType::Scalar { value } => ui.horizontal(|ui| {
+                ui.label(param_name);
+                ui.add(DragValue::new(value));
+            }),
+        }
+    }
+}
+
+impl UserResponseTrait for MyResponse {}
+
+impl NodeDataTrait for MyNodeData {
+    type Response = MyResponse;
+    type UserState = MyGraphState;
+    type DataType = MyDataType;
+    type ValueType = MyValueType;
+
+    fn bottom_ui(
+        &self,
+        ui: &mut Ui,
+        node_id: NodeId,
+        graph: &Graph<Self, Self::DataType, Self::ValueType>,
+        user_state: &Self::UserState,
+    ) -> Vec<NodeResponse<Self::Response>>
+    where
+        Self::Response: UserResponseTrait,
+    {
+        let mut responses = vec![];
+        let is_active = user_state
+            .active_node
+            .map(|id| id == node_id)
+            .unwrap_or(false);
+
+        if !is_active {
+            if ui.button("👁 Set active").clicked(){
+                responses.push(NodeResponse::User(MyResponse::SetActiveNode(node_id)));
+            } else {
+                egui::Button::new(egui::RichText::new("👁 Active").color(egui::Color32::BLACK))
+                    .fill(egui::Color32::GOLD);
+                if ui.add(button).clicked() {
+                    responses.push(NodeResponse::User(MyResponse::ClearActiveNode));
+                }
+            }
+
+        }
+        responses
+    }
+}
+
+type MyGraph = Graph<MyNodeData, MyDataType,MyValueType>;
+type MyEditorState = GraphEditorState<MyNodeData,MyDataType,MyValueType,MyNodeTemplate,MyGraphState>;
+
